@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Langini Meteo – Vento e Pioggia</title>
+
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;700&display=swap" rel="stylesheet">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  background: linear-gradient(145deg, #0b0e13, #111419);
+  color: #e9f6ff;
+  font-family: 'Segoe UI', sans-serif;
+  text-align: center;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 28px;
+  margin-top: 10px;
+  text-shadow: 0 0 12px #00aaff;
+}
+
+.card {
+  background: rgba(20,20,20,0.85);
+  padding: 20px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  margin: 20px auto;
+  box-shadow: 0 0 18px rgba(0,145,255,0.45);
+  border: 1px solid rgba(0,145,255,0.3);
+  backdrop-filter: blur(4px);
+}
+
+.value {
+  font-size: 44px;
+  font-weight: bold;
+  color: #ffffff;
+  text-shadow: 0 0 12px #009dff;
+}
+
+.subtitle {
+  font-size: 16px;
+  color: #8cd4ff;
+  margin-top: -10px;
+}
+
+canvas {
+  margin-top: 20px;
+  width: 100%;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🌬️ Langini Meteo – Vento / Pioggia</h1>
+
+<!-- Vento -->
+<div class="card">
+  <h2>🌪️ Velocità Vento</h2>
+  <div id="wind" class="value">-- km/h</div>
+  <div id="power" class="subtitle">Potenza: -- W</div>
+</div>
+
+<!-- Pioggia -->
+<div class="card">
+  <h2>🌦️ Stato Attuale</h2>
+  <div id="rain" class="value">--</div>
+</div>
+
+<!-- Energia Giornaliera -->
+<div class="card">
+  <h2>⚡ Energia Prodotta Oggi</h2>
+  <div id="energy" class="value">-- kWh</div>
+</div>
+
+<!-- Grafico vento -->
+<div class="card">
+  <h2>📊 Vento ultime 24 ore</h2>
+  <canvas id="windChart"></canvas>
+</div>
+
+<script>
+// ----------- CONFIG -------------
+const CHANNEL_ID = 2956240;
+const READ_KEY = "2B5OCENVF8TW06WZ";
+
+// Costanti turbina eolica
+const area = 0.567;   // m² (diametro 0.85 m)
+const eta = 0.25;     // rendimento 25%
+const rho = 1.225;    // densità aria
+
+let windChart;
+
+// --------------------------------
+// FUNZIONE PER CARICARE ULTIMO DATO
+// --------------------------------
+function loadLatest() {
+  fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_KEY}&results=1`)
+    .then(r => r.json())
+    .then(data => {
+      const f = data.feeds[0];
+
+      const wind = parseFloat(f.field1);
+      const rain = parseInt(f.field2);
+
+      document.getElementById("wind").innerHTML = wind.toFixed(1) + " km/h";
+
+      // Stato pioggia
+      if (rain === 1) {
+        rainEl.innerHTML = "Pioggia";
+        rainEl.style.color = "#ff6b6b";
+      } else {
+        rainEl.innerHTML = "Asciutto";
+        rainEl.style.color = "#7CD8FF";
+      }
+
+      // Potenza = 0.5 * rho * A * v³ * η
+      const v_ms = wind / 3.6;
+      const P = 0.5 * rho * area * (v_ms ** 3) * eta;
+
+      document.getElementById("power").innerHTML = "Potenza: " + P.toFixed(1) + " W";
+    });
+}
+
+// --------------------------------
+// CARICA STORICO 24 ORE PER GRAFICO
+// --------------------------------
+function loadHistory() {
+  fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/fields/1.json?api_key=${READ_KEY}&results=2000`)
+    .then(r => r.json())
+    .then(data => {
+      const labels = [];
+      const values = [];
+
+      data.feeds.forEach(f => {
+        labels.push(f.created_at.substring(11,16)); // solo orario HH:MM
+        values.push(parseFloat(f.field1));
+      });
+
+      if (windChart) windChart.destroy();
+
+      const ctx = document.getElementById("windChart").getContext("2d");
+      windChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [{
+            label: "Vento (km/h)",
+            data: values,
+            borderWidth: 2,
+            fill: false
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+
+      // Energia giornaliera stimata
+      let energyWh = 0;
+      for (let v of values) {
+        const v_ms = v / 3.6;
+        const P = 0.5 * rho * area * (v_ms ** 3) * eta;
+        energyWh += P / 60; // se ThingSpeak aggiorna ogni minuto
+      }
+
+      document.getElementById("energy").innerHTML = (energyWh / 1000).toFixed(3) + " kWh";
+    });
+}
+
+// Aggiornamento periodico
+setInterval(loadLatest, 7000);
+
+loadLatest();
+loadHistory();
+
+</script>
+
+</body>
+</html>
