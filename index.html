@@ -86,33 +86,28 @@ canvas {
   <canvas id="windChart"></canvas>
 </div>
 
-<script>
-// ----------- CONFIG -------------
-const CHANNEL_ID = 2956240;
-const READ_KEY = "2B5OCENVF8TW06WZ";
+ <script>
+const DATA_URL = "https://raw.githubusercontent.com/972Davide/Langini_Meteo_Wind.html/main/data.json";
 
-// Costanti turbina eolica
-const area = 0.567;   // m² (diametro 0.85 m)
-const eta = 0.25;     // rendimento 25%
-const rho = 1.225;    // densità aria
+const area = 0.567;   // m²
+const eta  = 0.25;
+const rho  = 1.225;
 
 let windChart;
+let labels = [];
+let values = [];
 
-// --------------------------------
-// FUNZIONE PER CARICARE ULTIMO DATO
-// --------------------------------
-function loadLatest() {
-  fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_KEY}&results=1`)
+function aggiornaDaGitHub() {
+  fetch(DATA_URL + "?t=" + Date.now())
     .then(r => r.json())
-    .then(data => {
-      const f = data.feeds[0];
+    .then(d => {
+      const wind = parseFloat(d.wind_kmh || 0);
+      const rain = parseInt(d.rain || 0);
 
-      const wind = parseFloat(f.field1);
-      const rain = parseInt(f.field2);
-
+      // valore istantaneo
       document.getElementById("wind").innerHTML = wind.toFixed(1) + " km/h";
 
-      // Stato pioggia
+      const rainEl = document.getElementById("rain");
       if (rain === 1) {
         rainEl.innerHTML = "Pioggia";
         rainEl.style.color = "#ff6b6b";
@@ -121,31 +116,20 @@ function loadLatest() {
         rainEl.style.color = "#7CD8FF";
       }
 
-      // Potenza = 0.5 * rho * A * v³ * η
+      // potenza istantanea
       const v_ms = wind / 3.6;
       const P = 0.5 * rho * area * (v_ms ** 3) * eta;
+      document.getElementById("power").innerHTML =
+        "Potenza: " + P.toFixed(1) + " W";
 
-      document.getElementById("power").innerHTML = "Potenza: " + P.toFixed(1) + " W";
-    });
-}
+      // storico locale (solo da quando apri la pagina)
+      const now = new Date();
+      labels.push(now.toTimeString().substring(0,5));
+      values.push(wind);
+      if (labels.length > 144) { labels.shift(); values.shift(); }
 
-// --------------------------------
-// CARICA STORICO 24 ORE PER GRAFICO
-// --------------------------------
-function loadHistory() {
-  fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/fields/1.json?api_key=${READ_KEY}&results=2000`)
-    .then(r => r.json())
-    .then(data => {
-      const labels = [];
-      const values = [];
-
-      data.feeds.forEach(f => {
-        labels.push(f.created_at.substring(11,16)); // solo orario HH:MM
-        values.push(parseFloat(f.field1));
-      });
-
+      // grafico
       if (windChart) windChart.destroy();
-
       const ctx = document.getElementById("windChart").getContext("2d");
       windChart = new Chart(ctx, {
         type: "line",
@@ -159,31 +143,29 @@ function loadHistory() {
           }]
         },
         options: {
-          scales: {
-            y: { beginAtZero: true }
-          }
+          scales: { y: { beginAtZero: true } }
         }
       });
 
-      // Energia giornaliera stimata
+      // energia giornaliera "locale" (dall'apertura pagina)
       let energyWh = 0;
       for (let v of values) {
-        const v_ms = v / 3.6;
-        const P = 0.5 * rho * area * (v_ms ** 3) * eta;
-        energyWh += P / 60; // se ThingSpeak aggiorna ogni minuto
+        const vms = v / 3.6;
+        const Pw  = 0.5 * rho * area * (vms ** 3) * eta;
+        energyWh += Pw / 60; // approx 1 min tra campioni
       }
-
-      document.getElementById("energy").innerHTML = (energyWh / 1000).toFixed(3) + " kWh";
-    });
+      document.getElementById("energy").innerHTML =
+        (energyWh / 1000).toFixed(3) + " kWh";
+    })
+    .catch(err => console.log("Errore fetch GitHub:", err));
 }
 
-// Aggiornamento periodico
-setInterval(loadLatest, 7000);
-
-loadLatest();
-loadHistory();
-
+// ogni 60 secondi
+setInterval(aggiornaDaGitHub, 60000);
+aggiornaDaGitHub();
 </script>
+ 
+
 
 </body>
 </html>
